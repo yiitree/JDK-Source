@@ -83,6 +83,11 @@ public class FutureTask<V> implements RunnableFuture<V> {
      * states use cheaper ordered/lazy writes because values are unique
      * and cannot be further modified.
      *
+     * 这个任务的运行状态，最初是新的。
+     * 只有在方法set、setException和cancel中，运行状态才会转变为terminal状态。
+     * 在完成过程中，状态可能呈现为COMPLETING(当结果被设置时)或中断(仅当中断运行以满足cancel(true))的瞬态值。
+     * 从这些中间状态到最终状态的转换使用更便宜的有序/惰性写入，因为值是唯一的，不能进一步修改。
+     *
      * Possible state transitions:
      * NEW -> COMPLETING -> NORMAL
      * NEW -> COMPLETING -> EXCEPTIONAL
@@ -90,17 +95,26 @@ public class FutureTask<V> implements RunnableFuture<V> {
      * NEW -> INTERRUPTING -> INTERRUPTED
      */
     private volatile int state;
+    // 新建
     private static final int NEW          = 0;
+    // 完成
     private static final int COMPLETING   = 1;
+    // 正常
     private static final int NORMAL       = 2;
+    // 异常
     private static final int EXCEPTIONAL  = 3;
+    // 取消
     private static final int CANCELLED    = 4;
+    // 打断中
     private static final int INTERRUPTING = 5;
+    // 已经被打断
     private static final int INTERRUPTED  = 6;
 
     /** The underlying callable; nulled out after running */
     private Callable<V> callable;
-    /** The result to return or exception to throw from get() */
+    /** The result to return or exception to throw from get()
+     * 线程执行结果
+     * */
     private Object outcome; // non-volatile, protected by state reads/writes
     /** The thread running the callable; CASed during run() */
     private volatile Thread runner;
@@ -115,8 +129,11 @@ public class FutureTask<V> implements RunnableFuture<V> {
     @SuppressWarnings("unchecked")
     private V report(int s) throws ExecutionException {
         Object x = outcome;
+        // 状态如果是NORMAL
         if (s == NORMAL)
+            // 返回结果
             return (V)x;
+        // 如果已经取消
         if (s >= CANCELLED)
             throw new CancellationException();
         throw new ExecutionException((Throwable)x);
@@ -193,6 +210,9 @@ public class FutureTask<V> implements RunnableFuture<V> {
     }
 
     /**
+     * 带有超时时间的获得执行结果
+     * @param timeout 超时时间
+     * @param unit 时间单位
      * @throws CancellationException {@inheritDoc}
      */
     public V get(long timeout, TimeUnit unit)
@@ -200,9 +220,12 @@ public class FutureTask<V> implements RunnableFuture<V> {
         if (unit == null)
             throw new NullPointerException();
         int s = state;
-        if (s <= COMPLETING &&
-            (s = awaitDone(true, unit.toNanos(timeout))) <= COMPLETING)
+        // 当前状态会否完成
+        if (s <= COMPLETING
+                // 等待超时时间后还没有完成  是否设置超时时间   超时时间转化为纳秒
+                && (s = awaitDone(true, unit.toNanos(timeout))) <= COMPLETING)
             throw new TimeoutException();
+        // 已经完成，返回执行结果
         return report(s);
     }
 
@@ -252,14 +275,22 @@ public class FutureTask<V> implements RunnableFuture<V> {
         }
     }
 
+    /**
+     * 线程运行 - Callable本质调用的还是call()方法
+     */
     public void run() {
         if (state != NEW ||
-            !UNSAFE.compareAndSwapObject(this, runnerOffset,
-                                         null, Thread.currentThread()))
+            !UNSAFE.compareAndSwapObject(
+                    this,
+                    runnerOffset,
+                    null,
+                    Thread.currentThread()))
             return;
         try {
             Callable<V> c = callable;
+            // 传入一个callable，并且任务还是新创建装填
             if (c != null && state == NEW) {
+                // 设置结果
                 V result;
                 boolean ran;
                 try {
@@ -350,6 +381,8 @@ public class FutureTask<V> implements RunnableFuture<V> {
      * Simple linked list nodes to record waiting threads in a Treiber
      * stack.  See other classes such as Phaser and SynchronousQueue
      * for more detailed explanation.
+     *
+     * 在Treiber堆栈中记录等待线程的简单链表节点。
      */
     static final class WaitNode {
         volatile Thread thread;
@@ -387,42 +420,66 @@ public class FutureTask<V> implements RunnableFuture<V> {
     }
 
     /**
+     * 等待设置的超时时间
      * Awaits completion or aborts on interrupt or timeout.
      *
-     * @param timed true if use timed waits
-     * @param nanos time to wait, if timed
-     * @return state upon completion
+     * @param timed true if use timed waits   是否设置超时时间
+     * @param nanos time to wait, if timed    等待的纳秒
+     * @return state upon completion 返回完成状态以后的状态，因为要等待执行完毕，如果没有执行完，打断
      */
-    private int awaitDone(boolean timed, long nanos)
-        throws InterruptedException {
+    private int awaitDone(boolean timed, long nanos) throws InterruptedException {
+        // 死亡时间
         final long deadline = timed ? System.nanoTime() + nanos : 0L;
+        // 等待节点
         WaitNode q = null;
+        // 设置等待队列开始不存在
         boolean queued = false;
         for (;;) {
+            // 线程是否被打断
             if (Thread.interrupted()) {
+                // 取消等待，直接抛出异常
                 removeWaiter(q);
                 throw new InterruptedException();
             }
 
             int s = state;
+            // 线程完成
             if (s > COMPLETING) {
+                // 等待节点中是否空了
                 if (q != null)
+                    // 把等待队列线程清空
                     q.thread = null;
+                // 返回线程状态
                 return s;
             }
+            // 如果刚好完成
             else if (s == COMPLETING) // cannot time out yet
+                // 让出cpu时间片
                 Thread.yield();
+            // 如果没有完成，把当前线程封装成一个等待节点
             else if (q == null)
                 q = new WaitNode();
+            // 如果等待队列不存在
             else if (!queued)
-                queued = UNSAFE.compareAndSwapObject(this, waitersOffset,
-                                                     q.next = waiters, q);
+                // 创建一个等待队列
+                queued = UNSAFE.compareAndSwapObject(
+                        this,
+                        waitersOffset,
+                        q.next = waiters,
+                        q
+                );
+            // 如果超时时间还是正数，说明还没有超时
             else if (timed) {
+                // 重新设置等待时间
                 nanos = deadline - System.nanoTime();
+                // 再次看是否超时
                 if (nanos <= 0L) {
+                    // 移除等待队列
                     removeWaiter(q);
+                    // 返回超时时间
                     return state;
                 }
+                // 还是没有超时，就先打断线程，设置打断超时时间为剩余超时时间
                 LockSupport.parkNanos(this, nanos);
             }
             else

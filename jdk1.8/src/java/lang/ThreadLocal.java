@@ -90,8 +90,7 @@ public class ThreadLocal<T> {
      * zero.
      * 原子操作(线程安全),从0开始,按照散列值进行递增
      */
-    private static AtomicInteger nextHashCode =
-        new AtomicInteger();
+    private static AtomicInteger nextHashCode = new AtomicInteger();
 
     /**
      * The difference between successively generated hash codes - turns
@@ -128,9 +127,10 @@ public class ThreadLocal<T> {
      * anonymous inner class will be used.
      *
      * @return the initial value for this thread-local
+     * 默认初始的ThreadLocal返回的value为null,一般会对该方法进行重写
      */
     protected T initialValue() {
-        return null;//默认初始的ThreadLocal返回的value为null,一般会对该方法进行重写
+        return null;
     }
 
     /**
@@ -327,8 +327,8 @@ public class ThreadLocal<T> {
          * as "stale entries" in the code that follows.
          * 弱引用
          */
-
-        static class Entry extends WeakReference<ThreadLocal<?>> {//这里只有ThreadLocal使用了弱引用
+        //这里只有ThreadLocal使用了弱引用
+        static class Entry extends WeakReference<ThreadLocal<?>> {
             /** The value associated with this ThreadLocal. */
             Object value;//value使用的是强引用
 
