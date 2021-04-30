@@ -327,15 +327,22 @@ public class LinkedBlockingQueue<E> extends AbstractQueue<E>
      *
      * @throws InterruptedException {@inheritDoc}
      * @throws NullPointerException {@inheritDoc}
+     * 放节点
      */
     public void put(E e) throws InterruptedException {
         if (e == null) throw new NullPointerException();
         // Note: convention in all put/take/etc is to preset local var
         // holding count negative to indicate failure unless set.
+        // c用于检查空位的
         int c = -1;
+        // node元素用于包装元素
         Node<E> node = new Node<E>(e);
+        // put锁，put和get分别设置不同锁
         final ReentrantLock putLock = this.putLock;
+        // count队列中元素个数
         final AtomicInteger count = this.count;
+
+        // 上锁，可以被打断
         putLock.lockInterruptibly();
         try {
             /*
@@ -346,17 +353,26 @@ public class LinkedBlockingQueue<E> extends AbstractQueue<E>
              * signalled if it ever changes from capacity. Similarly
              * for all other uses of count in other wait guards.
              */
+            // 队列满了，进行阻塞
             while (count.get() == capacity) {
+                // putLock的条件变量：等待不满
                 notFull.await();
             }
+            // 队列中有空位，进行put
             enqueue(node);
+            // put成功，元素计数+1，并把之前的值进行返回给c
+            // （注意是getAndIncrement，不是incrementAndGet） c = count-1
             c = count.getAndIncrement();
-            if (c + 1 < capacity)
+            if (c + 1 < capacity) {
+                // 如果添加完毕后，还有空余，可以继续放，唤醒其他put线程，只唤醒一个，防止更多线程抢占阻塞
                 notFull.signal();
+            }
         } finally {
             putLock.unlock();
         }
+        // 如果队列中只有一个元素了，最少一个元素，为哨兵节点，就唤醒take线程（takeLock，取线程）
         if (c == 0)
+            // 这里调用的是notEmpty.signal() 而不是notEmpty.signalAll() 是为了减少竞争
             signalNotEmpty();
     }
 
@@ -450,7 +466,10 @@ public class LinkedBlockingQueue<E> extends AbstractQueue<E>
         } finally {
             takeLock.unlock();
         }
+        // 如果队列中只有一个空位时, 叫醒put 线程
+        // 如果有多个线程进行出队, 第一个线程满足c == capacity, 但后续线程c < capacity
         if (c == capacity)
+            // 这里调用的是notFull.signal() 而不是notFull.signalAll() 是为了减少竞争
             signalNotFull();
         return x;
     }
